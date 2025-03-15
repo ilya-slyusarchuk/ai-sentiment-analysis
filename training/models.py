@@ -7,6 +7,8 @@ from sklearn.metrics import precision_score, accuracy_score
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 import os
+from torch.amp import GradScaler
+
 class TextEncoder(nn.Module):
     def __init__(self):
       super().__init__()
@@ -149,8 +151,21 @@ class MultiModalTrainer:
         'sentiments': 0.0
       }
       
+      # Get device
+      device = next(self.model.parameters()).device
+      device_type = device.type
+      
+      # Use mixed precision for speedup - updated syntax
+      scaler = GradScaler(device_type) if device_type in ['cuda', 'mps'] else None
+      
+      # Enable mixed precision for MPS (Apple Silicon) or CUDA
+      use_amp = device_type in ['cuda', 'mps']
+      
+      total_samples = 0
+      
       for batch in self.train_loader:
-        device = next(self.model.parameters()).device
+        batch_size = batch['text_input']['input_ids'].size(0)
+        total_samples += batch_size
         
         text_inputs = {
           'input_ids': batch['text_input']['input_ids'].to(device),
@@ -163,34 +178,43 @@ class MultiModalTrainer:
         
         self.optimizer.zero_grad()
         
-        outputs = self.model(text_inputs, video_frames, audio_data)
+        # Use automatic mixed precision where supported
+        if use_amp:
+          with torch.autocast(device_type=device_type):
+            outputs = self.model(text_inputs, video_frames, audio_data)
+            emotion_loss = self.emotion_criterion(outputs['emotions'], emotion_labels)
+            sentiment_loss = self.sentiment_criterion(outputs['sentiments'], sentiment_labels)
+            loss = emotion_loss + sentiment_loss
+            
+          if scaler:
+            scaler.scale(loss).backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            scaler.step(self.optimizer)
+            scaler.update()
+          else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+        else:
+          outputs = self.model(text_inputs, video_frames, audio_data)
+          emotion_loss = self.emotion_criterion(outputs['emotions'], emotion_labels)
+          sentiment_loss = self.sentiment_criterion(outputs['sentiments'], sentiment_labels)
+          loss = emotion_loss + sentiment_loss
+          
+          loss.backward()
+          torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+          self.optimizer.step()
         
-        emotion_loss = self.emotion_criterion(outputs['emotions'], emotion_labels)
-        sentiment_loss = self.sentiment_criterion(outputs['sentiments'], sentiment_labels)
+        # Update running losses
+        running_loss['total'] += loss.item() * batch_size
+        running_loss['emotions'] += emotion_loss.item() * batch_size
+        running_loss['sentiments'] += sentiment_loss.item() * batch_size
+      
+      # Calculate average losses
+      for key in running_loss:
+        running_loss[key] /= total_samples
         
-        loss = emotion_loss + sentiment_loss
-        
-        loss.backward()
-        
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        
-        self.optimizer.step()
-        
-        running_loss['total'] += loss.item()
-        running_loss['emotions'] += emotion_loss.item()
-        running_loss['sentiments'] += sentiment_loss.item()
-        
-        self.log_metrics({
-          'total': loss.item(),
-          'emotions': emotion_loss.item(),
-          'sentiments': sentiment_loss.item()
-        })
-        
-        self.global_step += 1
-        
-      return {
-        k: v / len(self.train_loader) for k, v in running_loss.items()
-      }
+      return running_loss
     
     def validate(self, data_loader, phase="validation"):
       self.model.eval()

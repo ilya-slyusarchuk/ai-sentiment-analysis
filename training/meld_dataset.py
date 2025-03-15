@@ -162,14 +162,47 @@ def collate_fn(batch):
     batch = list(filter(None, batch))
     return torch.utils.data.dataloader.default_collate(batch)
     
-def prepare_dataloader(train_csv_path, train_video_dir, dev_csv_path, dev_video_dir, test_csv_path, test_video_dir, batch_size = 32):
+def prepare_dataloader(train_csv_path, train_video_dir, dev_csv_path, dev_video_dir, test_csv_path, test_video_dir, batch_size=16):
     train_dataset = MELD_Dataset(train_csv_path, train_video_dir)
     dev_dataset = MELD_Dataset(dev_csv_path, dev_video_dir)
     test_dataset = MELD_Dataset(test_csv_path, test_video_dir)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    dev_loader = DataLoader(dev_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    # Determine optimal number of workers
+    # Use half the CPU cores, capped at 6 to avoid overhead
+    num_workers = min(6, os.cpu_count() // 2) if os.cpu_count() else 2
+    print(f"Using {num_workers} dataloader workers")
+    
+    # Create dataloaders with optimized settings
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
+        collate_fn=collate_fn
+    )
+    
+    dev_loader = DataLoader(
+        dev_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True,
+        collate_fn=collate_fn
+    )
+    
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True,
+        collate_fn=collate_fn
+    )
     
     return train_loader, dev_loader, test_loader
 
