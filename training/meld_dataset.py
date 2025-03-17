@@ -159,17 +159,31 @@ class MELD_Dataset(Dataset):
         
 def collate_fn(batch):
     # Filter out None values
-    batch = list(filter(None, batch))
-    return torch.utils.data.dataloader.default_collate(batch)
+    batch = list(filter(lambda x: x is not None, batch))
+    if len(batch) == 0:
+        return None
     
-def prepare_dataloader(train_csv_path, train_video_dir, dev_csv_path, dev_video_dir, test_csv_path, test_video_dir, batch_size=16):
+    # Use PyTorch's default collate function but ensure float32 for numerical tensors
+    batch_collated = torch.utils.data.dataloader.default_collate(batch)
+    
+    # Ensure float32 for video and audio tensors
+    if 'video_frames' in batch_collated:
+        batch_collated['video_frames'] = batch_collated['video_frames'].float()
+    
+    if 'audio_features' in batch_collated:
+        batch_collated['audio_features'] = batch_collated['audio_features'].float()
+    
+    return batch_collated
+    
+def prepare_dataloader(train_csv_path, train_video_dir, dev_csv_path, dev_video_dir, test_csv_path, test_video_dir, batch_size=32):
     train_dataset = MELD_Dataset(train_csv_path, train_video_dir)
     dev_dataset = MELD_Dataset(dev_csv_path, dev_video_dir)
     test_dataset = MELD_Dataset(test_csv_path, test_video_dir)
     
     # Determine optimal number of workers
-    # Use half the CPU cores, capped at 6 to avoid overhead
-    num_workers = min(6, os.cpu_count() // 2) if os.cpu_count() else 2
+    # Use half the CPU cores, capped at 8 to avoid overhead
+    print(f"CPU cores: {os.cpu_count()}")
+    num_workers = min(8, os.cpu_count() // 2) if os.cpu_count() else 2
     print(f"Using {num_workers} dataloader workers")
     
     # Create dataloaders with optimized settings

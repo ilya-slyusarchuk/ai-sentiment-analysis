@@ -155,11 +155,17 @@ class MultiModalTrainer:
       device = next(self.model.parameters()).device
       device_type = device.type
       
-      # Use mixed precision for speedup - updated syntax
-      scaler = GradScaler(device_type) if device_type in ['cuda', 'mps'] else None
+      # Force model to use float32 for MPS compatibility
+      if device_type == 'mps':
+        for param in self.model.parameters():
+          if param.data.dtype == torch.float64:
+            param.data = param.data.float()  # Convert to float32
       
-      # Enable mixed precision for MPS (Apple Silicon) or CUDA
-      use_amp = device_type in ['cuda', 'mps']
+      # Use mixed precision for speedup - only for CUDA
+      scaler = GradScaler() if device_type == 'cuda' else None
+      
+      # Enable mixed precision only for CUDA, not MPS
+      use_amp = device_type == 'cuda'
       
       total_samples = 0
       
@@ -225,6 +231,15 @@ class MultiModalTrainer:
         'sentiments': 0.0
       }
       
+      # Get device 
+      device = next(self.model.parameters()).device
+      
+      # Ensure float32 for MPS compatibility
+      if device.type == 'mps':
+        for param in self.model.parameters():
+          if param.data.dtype == torch.float64:
+            param.data = param.data.float()
+      
       all_emotion_predictions = []
       all_sentiment_predictions = []
       all_emotion_labels = []
@@ -232,7 +247,6 @@ class MultiModalTrainer:
       
       with torch.inference_mode():
         for batch in data_loader:
-          device = next(self.model.parameters()).device
           text_inputs = {
             'input_ids': batch['text_input']['input_ids'].to(device),
             'attention_mask': batch['text_input']['attention_mask'].to(device)
@@ -288,6 +302,9 @@ class MultiModalTrainer:
 class MultiModalFusion(nn.Module):
     def __init__(self):
         super().__init__()
+        
+        # Set default tensor type to float32 to avoid MPS float64 issues
+        torch.set_default_dtype(torch.float32)
         
         self.text_encoder = TextEncoder()
         self.video_encoder = VideoEncoder()
