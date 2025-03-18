@@ -219,14 +219,3 @@ def prepare_dataloader(train_csv_path, train_video_dir, dev_csv_path, dev_video_
     )
     
     return train_loader, dev_loader, test_loader
-
-if __name__ == "__main__":
-    train_loader, dev_loader, test_loader = prepare_dataloader('../dataset/train/train_sent_emo.csv', '../dataset/train/train_splits/', '../dataset/dev/dev_sent_emo.csv', '../dataset/dev/dev_splits_complete/', '../dataset/test/test_sent_emo.csv', '../dataset/test/output_repeated_splits_complete/')
-    
-    for batch in train_loader:
-        print(batch['text_input'])
-        print(batch['video_frames'].shape)
-        print(batch['audio_features'].shape)
-        print(batch['emotion_labels'])
-        print(batch['sentiment_labels'])
-        break
