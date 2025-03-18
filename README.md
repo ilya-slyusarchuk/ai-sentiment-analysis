@@ -60,7 +60,3 @@ Evaluate on test set:
 ```bash
 python training/eval.py --checkpoint path/to/model.pt
 ```
-
-## License
-
-[MIT License](LICENSE)
